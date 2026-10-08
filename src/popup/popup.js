@@ -1,6 +1,16 @@
 const $ = (id) => document.getElementById(id);
 
 let tabId = null;
+// Never leave the popup on "Checking this tab…": the content script answers well within this.
+const DETECT_TIMEOUT_MS = 25_000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { timeout: true })), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function show(el, visible) {
   el.hidden = !visible;
@@ -47,9 +57,12 @@ async function init() {
 
   let detected;
   try {
-    detected = await chrome.tabs.sendMessage(tabId, { type: 'ERB_DETECT' });
-  } catch (_e) {
-    $('hint').textContent = 'Reload this Freshsales tab so the extension can attach to it.';
+    detected = await withTimeout(chrome.tabs.sendMessage(tabId, { type: 'ERB_DETECT' }), DETECT_TIMEOUT_MS);
+  } catch (e) {
+    $('hint').textContent =
+      e && e.timeout
+        ? "Freshsales isn't answering right now. Close this and try again in a minute."
+        : 'Reload this Freshsales tab so the extension can attach to it.';
     return;
   }
   if (!detected || !detected.ok) {

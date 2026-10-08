@@ -3,10 +3,15 @@
 (function (root) {
   const FSX = (root.FSX = root.FSX || {});
   const { isRecycleBinName } = FSX.platform;
-  const { HttpError } = FSX.client;
+  const { HttpError, RateLimitError } = FSX.client;
 
   const PER_PAGE = 100;
   const FORGET_CONCURRENCY = 4;
+  // When Freshsales says 429 without a Retry-After, wait this long, doubling up to the cap.
+  const PAUSE_FIRST_MS = 60_000;
+  const PAUSE_MAX_MS = 10 * 60_000;
+  // Small cushion past Retry-After so we don't land a few ms early and get 429 again.
+  const PAUSE_SLACK_MS = 2_000;
 
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const hasId = (r) => isObj(r) && r.id !== null && r.id !== undefined;
@@ -54,6 +59,46 @@
     constructor(client) {
       this.client = client;
       this.forgetPrefix = null; // API prefix whose forget route answered, once known
+      this.pausedUntil = 0; // shared by all workers: no requests before this time
+      this.pauseStreak = 0; // consecutive pauses without a successful request
+    }
+
+    /** Sleep until `pausedUntil`, in short steps so Stop takes effect promptly. */
+    async waitOutPause(signal) {
+      for (;;) {
+        if (signal && signal.aborted) throw new Error('Cancelled');
+        const remaining = this.pausedUntil - this.client.now();
+        if (remaining <= 0) return;
+        await this.client.sleep(Math.min(1000, remaining));
+      }
+    }
+
+    /**
+     * Run `fn`, and whenever Freshsales rate-limits it, pause every worker until the limit
+     * resets and try again. `onPause(resumeAt)` lets the UI say why nothing is moving.
+     */
+    async withPause(fn, { signal, onPause = () => {} } = {}) {
+      for (;;) {
+        await this.waitOutPause(signal);
+        try {
+          const out = await fn();
+          this.pauseStreak = 0;
+          return out;
+        } catch (err) {
+          if (!(err instanceof RateLimitError)) throw err;
+          const backoff = Math.min(PAUSE_FIRST_MS * 2 ** this.pauseStreak, PAUSE_MAX_MS);
+          const wait = err.retryAfterMs !== null && err.retryAfterMs !== undefined ? err.retryAfterMs + PAUSE_SLACK_MS : backoff;
+          const until = this.client.now() + wait;
+          // Workers hitting the same limit together report one pause, not one each.
+          if (until > this.pausedUntil + PAUSE_SLACK_MS) {
+            this.pausedUntil = until;
+            this.pauseStreak += 1;
+            onPause(until);
+          } else if (until > this.pausedUntil) {
+            this.pausedUntil = until;
+          }
+        }
+      }
     }
 
     viewPaths(mod, viewId) {
@@ -86,8 +131,10 @@
       let views = [];
       try {
         views = await this.fetchViews(mod);
-      } catch (_e) {
-        // Without the view list we can't confirm the name, so the caller refuses to delete.
+      } catch (err) {
+        // Rate limiting says nothing about the view, so let the caller wait or report it.
+        if (err instanceof RateLimitError) throw err;
+        // Otherwise without the view list we can't confirm the name, so the caller refuses to delete.
       }
       if (mod.viewId) {
         const match = views.find((v) => v.id === String(mod.viewId));
@@ -108,7 +155,7 @@
      * deleted, so removing records can't shift the pages being read.
      * `onProgress({ page, fetched, totalPages })` is called per page.
      */
-    async fetchRecords(mod, viewId, { log = () => {}, onProgress = () => {}, signal } = {}) {
+    async fetchRecords(mod, viewId, { log = () => {}, onProgress = () => {}, onPause, signal } = {}) {
       log(`Platform: ${this.client.platformLabel}`);
       let paths = this.viewPaths(mod, viewId);
       const seen = new Set();
@@ -116,7 +163,10 @@
       let page = 1;
       for (;;) {
         if (signal && signal.aborted) throw new Error('Cancelled');
-        const { data, path } = await this.client.getFirst(paths, this.listParams(page));
+        const { data, path } = await this.withPause(() => this.client.getFirst(paths, this.listParams(page)), {
+          signal,
+          onPause,
+        });
         // Stick with the path that worked so later pages don't re-probe the fallbacks.
         paths = [path];
 
@@ -180,7 +230,7 @@
     async forgetRecords(
       mod,
       records,
-      { log = () => {}, onProgress = () => {}, signal, concurrency = FORGET_CONCURRENCY } = {}
+      { log = () => {}, onProgress = () => {}, onPause, signal, concurrency = FORGET_CONCURRENCY } = {}
     ) {
       const result = { forgotten: [], gone: [], failed: [] };
       const total = records.length;
@@ -188,10 +238,11 @@
       const one = async (rec) => {
         if (signal && signal.aborted) return;
         try {
-          const outcome = await this.forgetOne(mod, rec.id);
+          const outcome = await this.withPause(() => this.forgetOne(mod, rec.id), { signal, onPause });
           result[outcome === 'gone' ? 'gone' : 'forgotten'].push(rec.id);
         } catch (err) {
           if (err.noRoute) throw err;
+          if (signal && signal.aborted) return; // stopped while paused
           log(`Forget failed for id ${rec.id}: ${err.message}`);
           result.failed.push({ id: rec.id, error: err.message });
         }
@@ -200,6 +251,7 @@
       };
       if (!total) return result;
       await one(records[0]);
+      if (signal && signal.aborted) return { ...result, cancelled: true };
       if (this.forgetPrefix === null) {
         // The first call failed without revealing a working route; don't hammer the rest.
         throw new Error(`Could not forget record ${records[0].id}: ${result.failed[0].error}`);

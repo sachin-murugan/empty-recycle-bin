@@ -3,7 +3,7 @@
 // then permanently deletes ("forgets") each record.
 (function () {
   const { parseRecycleBinUrl } = FSX.platform;
-  const { CRMClient } = FSX.client;
+  const { CRMClient, RateLimitError } = FSX.client;
   const { RecycleBin } = FSX.recycleBin;
   const { confirmForget } = FSX.confirmDialog;
 
@@ -34,10 +34,23 @@
     return (meta && meta.getAttribute('content')) || '';
   }
 
-  async function makeBin(host) {
+  async function makeBin(host, clientOptions = {}) {
     return new RecycleBin(
-      new CRMClient({ host, apiKey: await apiKeyFor(host), csrfToken: csrfToken(), origin: location.origin })
+      new CRMClient({
+        host,
+        apiKey: await apiKeyFor(host),
+        csrfToken: csrfToken(),
+        origin: location.origin,
+        ...clientOptions,
+      })
     );
+  }
+
+  const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  function rateLimitMessage(err) {
+    const when = err.retryAfterMs ? ` Try again after ${clock(Date.now() + err.retryAfterMs)}.` : ' Try again in a few minutes.';
+    return `Freshsales' hourly API limit is used up for this account.${when}`;
   }
 
   const moduleLabel = (view) => MODULE_LABELS[view.entity] || view.entity;
@@ -45,8 +58,14 @@
   async function detect() {
     const view = parseRecycleBinUrl(location.href);
     if (!view) return { ok: true, view: null };
-    const bin = await makeBin(view.host);
-    Object.assign(view, await bin.resolveView(view), { moduleLabel: moduleLabel(view) });
+    // The popup waits on this, so never sit out a rate limit here: fail fast and say why.
+    const bin = await makeBin(view.host, { maxRetries: 2, maxWaitMs: 0, timeoutMs: 15_000 });
+    try {
+      Object.assign(view, await bin.resolveView(view), { moduleLabel: moduleLabel(view) });
+    } catch (err) {
+      if (err instanceof RateLimitError) return { ok: false, error: rateLimitMessage(err), running: !!running };
+      throw err;
+    }
     return { ok: true, view, running: !!running };
   }
 
@@ -58,10 +77,16 @@
     running = { aborted: false };
     const signal = running;
     const log = (msg) => console.debug('[Empty Recycle Bin]', msg);
+    let lastProgress = '';
+    const onPause = (resumeAt) => {
+      const msg = `Freshsales API limit reached. Waiting until ${clock(resumeAt)}, then carrying on. Keep this tab open.`;
+      log(msg);
+      report({ status: 'running', message: lastProgress ? `${lastProgress}. ${msg}` : msg, paused: true });
+    };
     try {
       report({ status: 'running', message: 'Checking the view…', done: 0 });
       const bin = await makeBin(view.host);
-      const resolved = await bin.resolveView(view);
+      const resolved = await bin.withPause(() => bin.resolveView(view), { signal, onPause });
       // Safety gate: never forget records from a view that isn't the recycle bin.
       if (!resolved.isRecycleBin) {
         const msg = 'This view is not the recycle bin, so nothing was deleted.';
@@ -72,6 +97,7 @@
       const records = await bin.fetchRecords(view, resolved.viewId, {
         log,
         signal,
+        onPause,
         onProgress: (p) =>
           report({
             status: 'running',
@@ -96,13 +122,11 @@
       const result = await bin.forgetRecords(view, records, {
         log,
         signal,
-        onProgress: (p) =>
-          report({
-            status: 'running',
-            message: `Deleted ${p.done} of ${p.total}${p.failed ? ` (${p.failed} failed)` : ''}`,
-            done: p.done,
-            total: p.total,
-          }),
+        onPause,
+        onProgress: (p) => {
+          lastProgress = `Deleted ${p.done} of ${p.total}${p.failed ? ` (${p.failed} failed)` : ''}`;
+          report({ status: 'running', message: lastProgress, done: p.done, total: p.total });
+        },
       });
 
       const deleted = result.forgotten.length + result.gone.length;
@@ -115,6 +139,10 @@
       report({ status: result.failed.length ? 'error' : 'done', message: parts.join(' ') });
       return { ok: true, count: deleted };
     } catch (err) {
+      if (signal.aborted && /Cancelled/.test(String(err && err.message))) {
+        report({ status: 'done', message: 'Stopped.' });
+        return { ok: true, cancelled: true };
+      }
       const message = err && err.message ? err.message : String(err);
       log(message);
       report({ status: 'error', message: friendlyError(message) });

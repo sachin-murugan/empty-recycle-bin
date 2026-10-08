@@ -11,6 +11,10 @@
   const { pathStyleFor, otherStyle, joinPrefix } = FSX.platform;
 
   const MAX_RETRIES = 5;
+  // Longest Retry-After the client sleeps through itself; longer waits go back to the caller.
+  const MAX_WAIT_MS = 30_000;
+  // A request that hasn't answered by then is aborted and retried.
+  const REQUEST_TIMEOUT_MS = 60_000;
 
   class HttpError extends Error {
     constructor(status, method, path, body, { json = false } = {}) {
@@ -20,6 +24,17 @@
       this.path = path;
       // True when the server answered with JSON, i.e. the API itself replied (vs an HTML web route).
       this.json = json;
+    }
+  }
+
+  /**
+   * Freshsales answered 429 and either asked us to wait longer than the client is willing
+   * to sleep, or kept answering 429. `retryAfterMs` is null when it didn't say how long.
+   */
+  class RateLimitError extends HttpError {
+    constructor(method, path, retryAfterMs) {
+      super(429, method, path, 'rate limited', { json: true });
+      this.retryAfterMs = retryAfterMs;
     }
   }
 
@@ -47,7 +62,18 @@
   }
 
   class CRMClient {
-    constructor({ host, apiKey, csrfToken, fetchImpl, origin, sleepImpl } = {}) {
+    constructor({
+      host,
+      apiKey,
+      csrfToken,
+      fetchImpl,
+      origin,
+      sleepImpl,
+      nowImpl,
+      maxRetries = MAX_RETRIES,
+      maxWaitMs = MAX_WAIT_MS,
+      timeoutMs = REQUEST_TIMEOUT_MS,
+    } = {}) {
       this.host = host;
       this.origin = origin || `https://${host}`;
       this.style = pathStyleFor(host);
@@ -56,6 +82,25 @@
       this.fetch = fetchImpl || root.fetch.bind(root);
       this.retryDelay = (attempt, cap) => Math.min(2 ** attempt, cap) * 1000;
       this.sleep = sleepImpl || sleep;
+      this.now = nowImpl || Date.now;
+      this.maxRetries = maxRetries;
+      this.maxWaitMs = maxWaitMs;
+      this.timeoutMs = timeoutMs;
+    }
+
+    /** fetch with a timeout, so a request the server never answers can't hang the run. */
+    async fetchWithTimeout(url, init) {
+      if (!this.timeoutMs || typeof AbortController === 'undefined') return this.fetch(url, init);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+      try {
+        return await this.fetch(url, { ...init, signal: ctrl.signal });
+      } catch (err) {
+        if (ctrl.signal.aborted) throw new Error(`no answer after ${Math.round(this.timeoutMs / 1000)}s`);
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     get platformLabel() {
@@ -73,31 +118,35 @@
       const url = new URL(path.startsWith('/') ? path : `/${path}`, this.origin);
       for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
 
+      const maxRetries = this.maxRetries;
       let lastErr;
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
         let resp;
         try {
-          resp = await this.fetch(url.toString(), {
+          resp = await this.fetchWithTimeout(url.toString(), {
             method,
             credentials: 'include',
             headers: this.headers(method),
           });
         } catch (err) {
           lastErr = err;
-          if (attempt < MAX_RETRIES) {
+          if (attempt < maxRetries) {
             await this.sleep(this.retryDelay(attempt, 15));
             continue;
           }
           throw new Error(`${method} ${path} failed: ${err.message}`);
         }
         if (resp.status === 429) {
-          lastErr = new HttpError(429, method, path, 'rate limited', { json: true });
-          if (attempt === MAX_RETRIES) break;
-          const retryAfter = parseRetryAfter(resp.headers && resp.headers.get('Retry-After'));
+          // Freshsales limits API calls per hour, so Retry-After can be many minutes. Don't
+          // sleep through that here (it would freeze the caller with no feedback); hand it back.
+          const retryAfter = parseRetryAfter(resp.headers && resp.headers.get('Retry-After'), this.now());
+          if (attempt === maxRetries || (retryAfter !== null && retryAfter > this.maxWaitMs)) {
+            throw new RateLimitError(method, path, retryAfter);
+          }
           await this.sleep(retryAfter !== null ? retryAfter : this.retryDelay(attempt, 30));
           continue;
         }
-        if (resp.status >= 500 && attempt < MAX_RETRIES) {
+        if (resp.status >= 500 && attempt < maxRetries) {
           lastErr = new HttpError(resp.status, method, path, '');
           await this.sleep(this.retryDelay(attempt, 20));
           continue;
@@ -156,5 +205,5 @@
     }
   }
 
-  FSX.client = { CRMClient, HttpError, parseRetryAfter };
+  FSX.client = { CRMClient, HttpError, RateLimitError, parseRetryAfter };
 })(globalThis);

@@ -20,6 +20,15 @@ associated data (the GDPR "right to be forgotten"). Whether forget accepts a rec
 already in the recycle bin is part of what needs checking; a JSON 404 is treated as "already
 gone" and counted as deleted.
 
+## Rate limits (seen live, 2026-10-08)
+
+A live run stalled after about 1,000 deletes, and the popup then hung on every page: session
+requests count against the account's hourly API limit, and the client slept through each
+429's Retry-After (up to an hour) inside every request. Now a 429 with a long Retry-After is
+handed back to the caller: the run pauses all workers until the limit resets and shows when it
+will resume, and the popup's check fails fast with the reset time. Each request also times out
+after 60 s so a stuck connection can't hang the run.
+
 ## URL shapes
 
 The recycle bin is expected to open as a normal saved view

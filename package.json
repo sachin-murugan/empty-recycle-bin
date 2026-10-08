@@ -1,11 +1,11 @@
 {
   "name": "empty-recycle-bin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Chrome extension that permanently deletes the records in a Freshsales recycle bin",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "rm -f dist/empty-recycle-bin.zip && mkdir -p dist && zip -r dist/empty-recycle-bin.zip manifest.json src -x '*.DS_Store'"
+    "package": "rm -f dist/empty-recycle-bin.zip && mkdir -p dist && zip -r dist/empty-recycle-bin.zip manifest.json src icons/*.png -x '*.DS_Store'"
   },
   "license": "MIT"
 }

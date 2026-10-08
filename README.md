@@ -32,6 +32,10 @@ Safety rules:
 - The first delete runs alone. If it's refused (no permission, unknown endpoint), the run
   stops before touching anything else.
 - Records that fail later are skipped and listed in the page console; the rest carry on.
+- Freshsales caps API calls per hour (about 1,000 on some plans), so a big recycle bin hits
+  the limit part-way. The run then pauses, shows the time it will carry on, and resumes on its
+  own; keep the tab open. **Stop** works while paused. Opening the popup while the limit is
+  used up says so and when to try again, instead of hanging on "Checking this tab…".
 
 Requests use your logged-in Freshsales session, plus the page's CSRF token for the deletes.
 If an account doesn't accept that, save an API key for the domain in the extension's
@@ -54,6 +58,7 @@ src/
   background/     per-tab state and toolbar badge
   popup/          Empty button, progress and Stop
   options/        optional per-domain API keys
+icons/           toolbar and store icons (icon.svg is the source)
 test/             node:test unit tests
 tools/            read-only DevTools console probe
 ```
