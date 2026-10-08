@@ -82,6 +82,11 @@ async function init() {
     $('hint').textContent = "This view isn't the recycle bin, so the extension won't delete from it.";
     return;
   }
+  if (!view.hasTemplate) {
+    $('hint').textContent =
+      'One-time setup: save the "Delete forever" request for this module in Options, then come back.';
+    return;
+  }
   show($('hint'), false);
   show($('note'), true);
   $('run').disabled = false;

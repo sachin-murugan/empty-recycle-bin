@@ -2,7 +2,7 @@
 // manifest loads them into the content script (in order, sharing globalThis.FSX).
 const path = require('node:path');
 
-const FILES = ['platform', 'client', 'recycle-bin'];
+const FILES = ['platform', 'client', 'ui-request', 'recycle-bin'];
 for (const f of FILES) require(path.join(__dirname, '..', 'src', 'lib', `${f}.js`));
 
 module.exports = globalThis.FSX;

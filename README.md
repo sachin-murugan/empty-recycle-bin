@@ -8,12 +8,30 @@ Freshsales recycle bin. It works on both platforms:
 | `*.freshsales.io` | Classic Freshsales | `/api` |
 | `*.myfreshworks.com` | Freshworks CRM | `/crm/sales/api` |
 
+> **Branch `without-api`:** this variant never calls the public Freshsales API (`/api`,
+> `/crm/sales/api`). It reads the recycle bin through the web app's own routes and deletes by
+> replaying the request the Freshsales screen itself sends for **Delete forever**, which you
+> copy once from DevTools. See "One-time setup" below. `main` keeps the API version.
+
 It is built the same way as [fs-list-view-exporter](https://github.com/sachin-murugan/fs-list-view-exporter):
 it reads the open view from the URL, pages through it with your logged-in session (or an
-optional API key), and retries on 429/5xx with backoff. Instead of writing a CSV it calls
-`DELETE /<module>/<id>/forget` for each record.
+optional API key on `main`), and retries on 429/5xx with backoff. Instead of writing a CSV
+it deletes every record in the view forever.
 
 > **This can't be undone.** Forgotten records are gone for good, including from the recycle bin.
+
+## One-time setup (without-api branch)
+
+For each module (Contacts, Leads, …) and each Freshsales account:
+
+1. Open the module's **Recycle Bin** in Freshsales, then open DevTools (F12) on the **Network** tab.
+2. Tick **one** record and click **Delete forever**. That record is deleted as normal.
+3. Right-click the request that appeared, choose **Copy > Copy as fetch**, and paste it into
+   the extension's **Options** page, then click **Save request**.
+
+The options page shows what it understood: "many records per request" (the extension then
+sends batches of 100, so 1,500 records is about 15 requests), "one record per request", or
+"whole view in one request". Cookies and the security token in the pasted text are not saved.
 
 ## Use it
 
@@ -38,8 +56,8 @@ Safety rules:
   used up says so and when to try again, instead of hanging on "Checking this tab…".
 
 Requests use your logged-in Freshsales session, plus the page's CSRF token for the deletes.
-If an account doesn't accept that, save an API key for the domain in the extension's
-**Options** page and it's sent as `Authorization: Token token=...`. See
+After deleting, the extension reads the recycle bin again and reports how many of the
+records are really gone. See
 [docs/recycle-bin-and-forget.md](docs/recycle-bin-and-forget.md) for what's confirmed and what
 still needs checking against a live account.
 
@@ -52,12 +70,13 @@ manifest.json
 src/
   lib/            shared logic, loaded into the content script in manifest order
     platform.js   host → platform, API path styles, URL parsing, recycle bin name check
-    client.js     same-origin fetch (GET and DELETE) with retries and path fallbacks
-    recycle-bin.js  resolves the recycle bin view, reads its record ids, forgets them
+    client.js     same-origin fetch with retries, timeouts and path fallbacks
+    ui-request.js turns a copied "Delete forever" request into a template and replays it
+    recycle-bin.js  resolves the recycle bin view, reads its record ids, deletes them
   content/        detects the open view, confirmation dialog, runs the delete
   background/     per-tab state and toolbar badge
   popup/          Empty button, progress and Stop
-  options/        optional per-domain API keys
+  options/        paste and manage the saved "Delete forever" requests
 icons/           toolbar and store icons (icon.svg is the source)
 test/             node:test unit tests
 tools/            read-only DevTools console probe

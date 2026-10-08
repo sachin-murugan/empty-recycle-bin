@@ -1,6 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { client, recycleBin } = require('./load');
+const { client, recycleBin, uiRequest } = require('./load');
+
+// Per-record template: the case where many requests can run into Freshsales' rate limit.
+const SINGLE = uiRequest.buildTemplate({
+  method: 'DELETE',
+  url: 'https://acme.myfreshworks.com/crm/sales/contacts/402000123456/forget',
+  headers: {},
+  body: null,
+});
 
 const CONTACTS = { entity: 'contact', endpoint: 'contacts', custom: false };
 
@@ -49,7 +57,7 @@ test('pauses for the hourly limit and finishes the rest instead of hanging', asy
     new client.CRMClient({ host: 'acme.myfreshworks.com', fetchImpl: api.fetchImpl, sleepImpl: clock.sleep, nowImpl: clock.now })
   );
   const pauses = [];
-  const result = await bin.forgetRecords(CONTACTS, records(1500), { onPause: (until) => pauses.push(until) });
+  const result = await bin.forgetWithTemplate(SINGLE, records(1500), { onPause: (until) => pauses.push(until) });
   assert.equal(result.forgotten.length, 1500);
   assert.equal(result.failed.length, 0);
   assert.equal(api.forgotten.size, 1500);
@@ -63,7 +71,7 @@ test('without Retry-After it backs off and still finishes', async () => {
   const bin = new recycleBin.RecycleBin(
     new client.CRMClient({ host: 'acme.myfreshworks.com', fetchImpl: api.fetchImpl, sleepImpl: clock.sleep, nowImpl: clock.now })
   );
-  const result = await bin.forgetRecords(CONTACTS, records(120));
+  const result = await bin.forgetWithTemplate(SINGLE, records(120));
   assert.equal(result.forgotten.length, 120);
   assert.equal(result.failed.length, 0);
 });
@@ -79,7 +87,7 @@ test('Stop works while paused', async () => {
   const bin = new recycleBin.RecycleBin(
     new client.CRMClient({ host: 'acme.myfreshworks.com', fetchImpl: api.fetchImpl, sleepImpl: sleep, nowImpl: clock.now })
   );
-  const result = await bin.forgetRecords(CONTACTS, records(50), { signal });
+  const result = await bin.forgetWithTemplate(SINGLE, records(50), { signal });
   assert.equal(result.cancelled, true);
   assert.equal(result.forgotten.length, 10);
   assert.ok(clock.slept < 120_000, 'did not sit out the whole hour');

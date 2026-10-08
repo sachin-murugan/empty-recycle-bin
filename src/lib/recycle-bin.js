@@ -1,12 +1,14 @@
-// Reads the records in a module's recycle bin view and permanently deletes ("forgets") them.
-// Paging and path fallbacks follow fs-list-view-exporter's fetcher.js.
+// Reads the records in a module's recycle bin view and permanently deletes them by replaying
+// the web app's own "Delete forever" request. Paging follows fs-list-view-exporter's fetcher.js,
+// using only the web app's routes (no public /api prefix) on this branch.
 (function (root) {
   const FSX = (root.FSX = root.FSX || {});
   const { isRecycleBinName } = FSX.platform;
-  const { HttpError, RateLimitError } = FSX.client;
+  const { RateLimitError } = FSX.client;
+  const { plan } = FSX.uiRequest;
 
   const PER_PAGE = 100;
-  const FORGET_CONCURRENCY = 4;
+  const SINGLE_CONCURRENCY = 4;
   // When Freshsales says 429 without a Retry-After, wait this long, doubling up to the cap.
   const PAUSE_FIRST_MS = 60_000;
   const PAUSE_MAX_MS = 10 * 60_000;
@@ -50,15 +52,10 @@
     return [...new Set(items)];
   }
 
-  // A 404 that isn't JSON, or a 405, means this prefix has no such route: try the next one.
-  const isMissingRoute = (err) => err instanceof HttpError && ((err.status === 404 && !err.json) || err.status === 405);
-  // A JSON 404 from the API means the route exists but the record is already gone.
-  const isAlreadyGone = (err) => err instanceof HttpError && err.status === 404 && err.json;
 
   class RecycleBin {
     constructor(client) {
       this.client = client;
-      this.forgetPrefix = null; // API prefix whose forget route answered, once known
       this.pausedUntil = 0; // shared by all workers: no requests before this time
       this.pauseStreak = 0; // consecutive pauses without a successful request
     }
@@ -190,73 +187,44 @@
       return all;
     }
 
-    forgetSuffix(mod, id) {
-      return mod.custom ? `custom_module/${mod.entity}/${id}/forget` : `${mod.endpoint}/${id}/forget`;
-    }
-
-    /** DELETE …/<id>/forget, trying API prefixes until one has the route. Returns 'forgotten' or 'gone'. */
-    async forgetOne(mod, id) {
-      const suffix = this.forgetSuffix(mod, id);
-      const prefixes = this.forgetPrefix !== null ? [this.forgetPrefix] : this.client.apiPrefixes();
-      const errors = [];
-      for (const prefix of prefixes) {
-        const path = FSX.platform.joinPrefix(prefix, suffix);
-        try {
-          await this.client.delete(path);
-          this.forgetPrefix = prefix;
-          return 'forgotten';
-        } catch (err) {
-          if (isAlreadyGone(err)) {
-            this.forgetPrefix = prefix;
-            return 'gone';
-          }
-          if (isMissingRoute(err) && this.forgetPrefix === null) {
-            errors.push(err.message);
-            continue;
-          }
-          throw err;
-        }
-      }
-      const e = new Error('No forget endpoint answered:\n  ' + errors.join('\n  '));
-      e.noRoute = true;
-      throw e;
-    }
-
     /**
-     * Forget every record. The first one runs alone to find the working API prefix; if no
-     * prefix has the forget route, this throws before touching anything else.
-     * Returns { forgotten: [id], gone: [id], failed: [{ id, error }] }.
+     * Delete forever by replaying the web app's own request (see ui-request.js) for every
+     * record. Bulk templates go one batch at a time; per-record templates run a few at once.
+     * The first request runs alone: if the web app's endpoint refuses it, nothing else is sent.
+     * Returns { forgotten: [id], failed: [{ id, error }], cancelled? }. "forgotten" means the
+     * server accepted the request; the caller re-reads the recycle bin to confirm.
      */
-    async forgetRecords(
-      mod,
+    async forgetWithTemplate(
+      template,
       records,
-      { log = () => {}, onProgress = () => {}, onPause, signal, concurrency = FORGET_CONCURRENCY } = {}
+      { csrfToken, log = () => {}, onProgress = () => {}, onPause, signal, concurrency = SINGLE_CONCURRENCY } = {}
     ) {
-      const result = { forgotten: [], gone: [], failed: [] };
-      const total = records.length;
+      const result = { forgotten: [], failed: [] };
+      const ids = records.map((r) => r.id);
+      if (!ids.length) return result;
+      const requests = plan(template, ids, { csrfToken });
+      const total = ids.length;
       let done = 0;
-      const one = async (rec) => {
+      const one = async (req) => {
         if (signal && signal.aborted) return;
+        const batch = req.ids || ids;
         try {
-          const outcome = await this.withPause(() => this.forgetOne(mod, rec.id), { signal, onPause });
-          result[outcome === 'gone' ? 'gone' : 'forgotten'].push(rec.id);
+          await this.withPause(() => this.client.send(req), { signal, onPause });
+          result.forgotten.push(...batch);
         } catch (err) {
-          if (err.noRoute) throw err;
-          if (signal && signal.aborted) return; // stopped while paused
-          log(`Forget failed for id ${rec.id}: ${err.message}`);
-          result.failed.push({ id: rec.id, error: err.message });
+          if (signal && signal.aborted) return;
+          log(`Delete forever failed for ${batch.length} record(s) (${batch.slice(0, 5).join(', ')}…): ${err.message}`);
+          batch.forEach((id) => result.failed.push({ id, error: err.message }));
         }
-        done += 1;
+        done += batch.length;
         onProgress({ done, total, failed: result.failed.length });
       };
-      if (!total) return result;
-      await one(records[0]);
+      await one(requests[0]);
       if (signal && signal.aborted) return { ...result, cancelled: true };
-      if (this.forgetPrefix === null) {
-        // The first call failed without revealing a working route; don't hammer the rest.
-        throw new Error(`Could not forget record ${records[0].id}: ${result.failed[0].error}`);
+      if (!result.forgotten.length) {
+        throw new Error(`Freshsales refused the first delete: ${result.failed[0].error}`);
       }
-      await mapWithConcurrency(records.slice(1), concurrency, one);
+      await mapWithConcurrency(requests.slice(1), template.mode === 'single' ? concurrency : 1, one);
       if (signal && signal.aborted) result.cancelled = true;
       return result;
     }

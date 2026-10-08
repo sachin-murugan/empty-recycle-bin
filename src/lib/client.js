@@ -117,17 +117,26 @@
     async request(method, path, params) {
       const url = new URL(path.startsWith('/') ? path : `/${path}`, this.origin);
       for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
+      return this.send({ method, url: url.toString(), label: path });
+    }
+
+    /**
+     * Send one request with retries. `headers` replace the defaults (used to replay a request
+     * the web app made); `body` is a string. Same-origin URLs only.
+     */
+    async send({ method, url: rawUrl, headers, body = null, label }) {
+      const url = new URL(rawUrl, this.origin);
+      if (url.origin !== new URL(this.origin).origin) throw new Error(`Refusing to send to another site: ${url.origin}`);
+      const path = label || url.pathname;
 
       const maxRetries = this.maxRetries;
       let lastErr;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         let resp;
         try {
-          resp = await this.fetchWithTimeout(url.toString(), {
-            method,
-            credentials: 'include',
-            headers: this.headers(method),
-          });
+          const init = { method, credentials: 'include', headers: headers ? { ...headers } : this.headers(method) };
+          if (body !== null && body !== undefined) init.body = body;
+          resp = await this.fetchWithTimeout(url.toString(), init);
         } catch (err) {
           lastErr = err;
           if (attempt < maxRetries) {

@@ -6,31 +6,41 @@
   <title>Empty Recycle Bin options</title>
   <style>
     :root { color-scheme: light dark; --muted: #6b7280; --border: #d1d5db; }
-    body { font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 16px; min-width: 420px; }
+    body { font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 16px; min-width: 460px; max-width: 640px; }
     h1 { font-size: 15px; margin: 0 0 6px; }
-    p { color: var(--muted); margin: 0 0 12px; }
-    label { display: block; font-weight: 600; margin: 10px 0 4px; }
-    input { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; box-sizing: border-box; }
-    button { margin-top: 12px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); font: inherit; cursor: pointer; }
+    p, ol { color: var(--muted); margin: 0 0 12px; }
+    ol { padding-left: 18px; }
+    textarea { width: 100%; min-height: 140px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; box-sizing: border-box; }
+    button { margin-top: 8px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); font: inherit; cursor: pointer; }
     ul { padding-left: 18px; }
+    li { margin-bottom: 4px; }
     li button { margin: 0 0 0 8px; padding: 1px 8px; font-size: 12px; }
-    #status { margin-left: 8px; color: #16a34a; }
+    code { font-size: 12px; }
+    #status { margin-left: 8px; }
+    #status.ok { color: #16a34a; }
+    #status.err { color: #dc2626; }
   </style>
 </head>
 <body>
-  <h1>API keys (optional)</h1>
-  <p>By default the extension uses your logged-in Freshsales session. If an account blocks that, save its API key here
-     (Profile settings &gt; API settings). Keys are stored only in this browser.</p>
+  <h1>"Delete forever" request (one-time setup per module)</h1>
+  <p>This version doesn't use the Freshsales API. It sends the same request the Freshsales screen sends when you
+     delete records forever from the recycle bin, so it needs one example of that request:</p>
+  <ol>
+    <li>In Freshsales, open the module's <b>Recycle Bin</b> and open DevTools (F12) on the <b>Network</b> tab.</li>
+    <li>Tick <b>one</b> record and click <b>Delete forever</b> (that record is deleted as usual).</li>
+    <li>In the Network list, right-click the request that appeared, choose <b>Copy &gt; Copy as fetch</b> and paste it below.</li>
+  </ol>
+  <textarea id="paste" spellcheck="false" placeholder='fetch("https://yourcompany.myfreshworks.com/crm/sales/…", { "headers": {…}, "body": "…", "method": "…" });'></textarea>
+  <button id="save">Save request</button><span id="status"></span>
 
-  <label for="host">Domain</label>
-  <input id="host" placeholder="yourcompany.myfreshworks.com" autocomplete="off" />
-  <label for="key">API key</label>
-  <input id="key" type="password" autocomplete="off" />
-  <button id="save">Save key</button><span id="status"></span>
-
-  <h1 style="margin-top:20px">Saved keys</h1>
+  <h1 style="margin-top:20px">Saved requests</h1>
   <ul id="saved"></ul>
+  <p>Cookies and the security token in the pasted text are not saved; the extension uses the open Freshsales tab's
+     own session when it runs.</p>
 
+  <script src="../lib/platform.js"></script>
+  <script src="../lib/ui-request.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

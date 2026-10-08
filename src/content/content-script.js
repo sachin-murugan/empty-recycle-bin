@@ -1,6 +1,7 @@
 // Runs on Freshsales / Freshworks CRM pages. Detects the open recycle bin view, and on request
-// reads every record in it with the user's session, asks for confirmation in the page and
-// then permanently deletes ("forgets") each record.
+// reads every record in it through the web app's own routes, asks for confirmation in the page
+// and then deletes each record forever by replaying the web app's own "Delete forever" request
+// (saved once in the options page). No public /api calls on this branch.
 (function () {
   const { parseRecycleBinUrl } = FSX.platform;
   const { CRMClient, RateLimitError } = FSX.client;
@@ -20,12 +21,14 @@
     chrome.runtime.sendMessage({ type: 'ERB_STATE', state }).catch(() => {});
   }
 
-  async function apiKeyFor(host) {
+  /** The saved "Delete forever" request for this site and module, or null. */
+  async function templateFor(view) {
     try {
-      const { apiKeys = {} } = await chrome.storage.local.get('apiKeys');
-      return apiKeys[host] || '';
+      const { uiTemplates = {} } = await chrome.storage.local.get('uiTemplates');
+      const site = uiTemplates[view.host] || {};
+      return site[view.endpoint] || site['*'] || null;
     } catch (_e) {
-      return '';
+      return null;
     }
   }
 
@@ -34,23 +37,15 @@
     return (meta && meta.getAttribute('content')) || '';
   }
 
-  async function makeBin(host, clientOptions = {}) {
-    return new RecycleBin(
-      new CRMClient({
-        host,
-        apiKey: await apiKeyFor(host),
-        csrfToken: csrfToken(),
-        origin: location.origin,
-        ...clientOptions,
-      })
-    );
+  function makeBin(host, clientOptions = {}) {
+    return new RecycleBin(new CRMClient({ host, csrfToken: csrfToken(), origin: location.origin, ...clientOptions }));
   }
 
   const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   function rateLimitMessage(err) {
     const when = err.retryAfterMs ? ` Try again after ${clock(Date.now() + err.retryAfterMs)}.` : ' Try again in a few minutes.';
-    return `Freshsales' hourly API limit is used up for this account.${when}`;
+    return `Freshsales is rate-limiting this account right now.${when}`;
   }
 
   const moduleLabel = (view) => MODULE_LABELS[view.entity] || view.entity;
@@ -59,13 +54,14 @@
     const view = parseRecycleBinUrl(location.href);
     if (!view) return { ok: true, view: null };
     // The popup waits on this, so never sit out a rate limit here: fail fast and say why.
-    const bin = await makeBin(view.host, { maxRetries: 2, maxWaitMs: 0, timeoutMs: 15_000 });
+    const bin = makeBin(view.host, { maxRetries: 2, maxWaitMs: 0, timeoutMs: 15_000 });
     try {
       Object.assign(view, await bin.resolveView(view), { moduleLabel: moduleLabel(view) });
     } catch (err) {
       if (err instanceof RateLimitError) return { ok: false, error: rateLimitMessage(err), running: !!running };
       throw err;
     }
+    view.hasTemplate = !!(await templateFor(view));
     return { ok: true, view, running: !!running };
   }
 
@@ -73,39 +69,40 @@
     if (running) return { ok: false, error: 'Already running in this tab.' };
     const view = parseRecycleBinUrl(location.href);
     if (!view) return { ok: false, error: 'Open the recycle bin of a module (e.g. Contacts) first.' };
+    const template = await templateFor(view);
+    if (!template) {
+      return { ok: false, error: 'Save the "Delete forever" request for this module in Options first (one-time setup).' };
+    }
 
     running = { aborted: false };
     const signal = running;
     const log = (msg) => console.debug('[Empty Recycle Bin]', msg);
     let lastProgress = '';
     const onPause = (resumeAt) => {
-      const msg = `Freshsales API limit reached. Waiting until ${clock(resumeAt)}, then carrying on. Keep this tab open.`;
+      const msg = `Freshsales is rate-limiting. Waiting until ${clock(resumeAt)}, then carrying on. Keep this tab open.`;
       log(msg);
       report({ status: 'running', message: lastProgress ? `${lastProgress}. ${msg}` : msg, paused: true });
     };
     try {
       report({ status: 'running', message: 'Checking the view…', done: 0 });
-      const bin = await makeBin(view.host);
+      const bin = makeBin(view.host);
       const resolved = await bin.withPause(() => bin.resolveView(view), { signal, onPause });
-      // Safety gate: never forget records from a view that isn't the recycle bin.
+      // Safety gate: never delete records from a view that isn't the recycle bin.
       if (!resolved.isRecycleBin) {
         const msg = 'This view is not the recycle bin, so nothing was deleted.';
         report({ status: 'error', message: msg });
         return { ok: false, error: msg };
       }
 
-      const records = await bin.fetchRecords(view, resolved.viewId, {
-        log,
-        signal,
-        onPause,
-        onProgress: (p) =>
-          report({
-            status: 'running',
-            message: `Reading the recycle bin: ${p.fetched} records (page ${p.page}${p.totalPages ? ` of ${p.totalPages}` : ''})`,
-            done: p.page,
-            total: p.totalPages,
-          }),
-      });
+      const read = (onProgress) => bin.fetchRecords(view, resolved.viewId, { log, signal, onPause, onProgress });
+      const records = await read((p) =>
+        report({
+          status: 'running',
+          message: `Reading the recycle bin: ${p.fetched} records (page ${p.page}${p.totalPages ? ` of ${p.totalPages}` : ''})`,
+          done: p.page,
+          total: p.totalPages,
+        })
+      );
 
       if (!records.length) {
         report({ status: 'done', message: 'The recycle bin is already empty.' });
@@ -119,7 +116,8 @@
         return { ok: true, count: 0, cancelled: true };
       }
 
-      const result = await bin.forgetRecords(view, records, {
+      const result = await bin.forgetWithTemplate(template, records, {
+        csrfToken: csrfToken(),
         log,
         signal,
         onPause,
@@ -128,15 +126,19 @@
           report({ status: 'running', message: lastProgress, done: p.done, total: p.total });
         },
       });
-
-      const deleted = result.forgotten.length + result.gone.length;
-      log(`Forgotten: ${result.forgotten.join(', ') || 'none'}`);
-      if (result.gone.length) log(`Already gone: ${result.gone.join(', ')}`);
       if (result.failed.length) console.warn('[Empty Recycle Bin] Failed:', result.failed);
+
+      // The server accepting a request isn't proof; read the bin again and count what's left.
+      report({ status: 'running', message: 'Checking the recycle bin again…' });
+      const wanted = new Set(records.map((r) => r.id));
+      const left = (await read(() => {})).filter((r) => wanted.has(r.id)).length;
+      const deleted = records.length - left;
+      log(`Requested ${result.forgotten.length}, failed ${result.failed.length}, still in the recycle bin ${left}`);
+
       const parts = [`Permanently deleted ${deleted} of ${records.length} records.`];
-      if (result.failed.length) parts.push(`${result.failed.length} failed; ids are in the page console.`);
+      if (left) parts.push(`${left} are still in the recycle bin; details are in the page console.`);
       if (result.cancelled) parts.push('Stopped early.');
-      report({ status: result.failed.length ? 'error' : 'done', message: parts.join(' ') });
+      report({ status: left && !result.cancelled ? 'error' : 'done', message: parts.join(' ') });
       return { ok: true, count: deleted };
     } catch (err) {
       if (signal.aborted && /Cancelled/.test(String(err && err.message))) {
@@ -154,13 +156,16 @@
 
   function friendlyError(message) {
     if (/HTTP 401|HTTP 403/.test(message)) {
-      return 'Freshsales refused the request. Make sure you are logged in with permission to delete records, or add an API key in the extension options.';
+      return 'Freshsales refused the request. Make sure you are logged in with permission to delete records.';
     }
     if (/HTTP 422.*(csrf|authenticity)/i.test(message)) {
-      return 'Freshsales rejected the session for deletes. Reload the tab, or add an API key in the extension options.';
+      return 'Freshsales rejected the session for deletes. Reload the tab and try again.';
     }
-    if (/All paths failed|No forget endpoint/.test(message)) {
-      return 'Could not reach the Freshsales API for this account. Details are in the page console.';
+    if (/refused the first delete/.test(message)) {
+      return 'Freshsales refused the saved "Delete forever" request. Save it again in Options from a fresh delete, then retry. Details are in the page console.';
+    }
+    if (/All paths failed/.test(message)) {
+      return "Could not read the recycle bin through the web app's routes. Details are in the page console.";
     }
     return message;
   }

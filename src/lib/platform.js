@@ -7,13 +7,14 @@
   const CLASSIC = {
     platform: 'classic',
     label: 'Classic Freshsales (.freshsales.io)',
-    apiFallbacks: ['/api', ''],
+    // without-api branch: only the web app's own routes, never the public /api prefix.
+    apiFallbacks: [''],
   };
 
   const CRM = {
     platform: 'crm',
     label: 'Freshworks CRM (.myfreshworks.com)',
-    apiFallbacks: ['/crm/sales/api', '/crm/sales'],
+    apiFallbacks: ['/crm/sales'],
   };
 
   function detectPlatform(host) {
@@ -35,6 +36,15 @@
     const s = suffix.startsWith('/') ? suffix : `/${suffix}`;
     if (!prefix) return s;
     return prefix.replace(/\/+$/, '') + s;
+  }
+
+  /** Module key a URL path belongs to (contacts, sales_accounts, cm_policy…), or null. */
+  function moduleKeyFromPath(pathname) {
+    const custom = String(pathname).match(/\/custom_module\/([\w-]+)/);
+    if (custom) return custom[1];
+    const std = String(pathname).match(/\/(contacts|deals|sales_accounts|accounts|leads)(?=[/?#]|$)/);
+    if (!std) return null;
+    return std[1] === 'accounts' ? 'sales_accounts' : std[1];
   }
 
   // Module slug in the web app URL -> { entity, endpoint } used by the API.
@@ -108,5 +118,6 @@
     joinPrefix,
     parseRecycleBinUrl,
     isRecycleBinName,
+    moduleKeyFromPath,
   };
 })(globalThis);

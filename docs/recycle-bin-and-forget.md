@@ -1,5 +1,30 @@
 # Recycle bin and forget: findings
 
+## without-api branch (2026-10-08)
+
+Asked for after the API version hit the hourly API limit. This branch:
+
+- Reads `filters` and `{module}/view/{id}` through the web app's routes only
+  (`/crm/sales/...` on CRM, `/...` on classic). The exporter kept these as fallbacks behind
+  the `/api` prefixes; they are **(to verify)** as JSON endpoints on a live account. If they
+  answer HTML instead, the run stops with "Could not read the recycle bin…".
+- Deletes by replaying the request the Freshsales UI sends for **Delete forever**, captured
+  once by the user with DevTools "Copy as fetch". The real endpoint and body are unknown
+  until someone captures one, so `ui-request.js` handles the common shapes: an id array in a
+  JSON body (batches of 100), `ids[]` form fields, an id in the URL path (one request per
+  record), or no ids at all (the whole view in one request).
+- Checks its own work: after deleting, it reads the recycle bin again and reports how many
+  of the targeted records are still there.
+- Whether the UI's own routes count against the API's hourly limit is **(to verify)**. Even
+  if they do, a bulk request deletes 100 records per call, so a recycle bin of 1,500 is about
+  15 requests instead of 1,500.
+
+An earlier idea, having the extension watch the page's own network calls to learn the
+request automatically, was dropped: patching the page's `fetch`/`XMLHttpRequest` is more
+invasive than a one-time copy and paste the user controls.
+
+## API version (main)
+
 Status: built from the patterns confirmed for
 [fs-list-view-exporter](https://github.com/sachin-murugan/fs-list-view-exporter/blob/main/docs/auth-and-list-view.md)
 (session-cookie GETs on `/crm/sales/api` and `/api`, the `filters` list, and paging a
