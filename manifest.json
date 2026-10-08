@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Empty Recycle Bin",
+  "version": "0.1.0",
+  "description": "Permanently delete (forget) every record in a Freshsales / Freshworks CRM recycle bin, after you confirm.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://*.freshsales.io/*",
+    "https://*.myfreshworks.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.freshsales.io/*",
+        "https://*.myfreshworks.com/*"
+      ],
+      "js": [
+        "src/lib/platform.js",
+        "src/lib/client.js",
+        "src/lib/recycle-bin.js",
+        "src/content/confirm-dialog.js",
+        "src/content/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Empty recycle bin",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": false
+  }
+}

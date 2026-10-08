@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Empty Recycle Bin options</title>
+  <style>
+    :root { color-scheme: light dark; --muted: #6b7280; --border: #d1d5db; }
+    body { font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 16px; min-width: 420px; }
+    h1 { font-size: 15px; margin: 0 0 6px; }
+    p { color: var(--muted); margin: 0 0 12px; }
+    label { display: block; font-weight: 600; margin: 10px 0 4px; }
+    input { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; box-sizing: border-box; }
+    button { margin-top: 12px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); font: inherit; cursor: pointer; }
+    ul { padding-left: 18px; }
+    li button { margin: 0 0 0 8px; padding: 1px 8px; font-size: 12px; }
+    #status { margin-left: 8px; color: #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>API keys (optional)</h1>
+  <p>By default the extension uses your logged-in Freshsales session. If an account blocks that, save its API key here
+     (Profile settings &gt; API settings). Keys are stored only in this browser.</p>
+
+  <label for="host">Domain</label>
+  <input id="host" placeholder="yourcompany.myfreshworks.com" autocomplete="off" />
+  <label for="key">API key</label>
+  <input id="key" type="password" autocomplete="off" />
+  <button id="save">Save key</button><span id="status"></span>
+
+  <h1 style="margin-top:20px">Saved keys</h1>
+  <ul id="saved"></ul>
+
+  <script src="options.js"></script>
+</body>
+</html>

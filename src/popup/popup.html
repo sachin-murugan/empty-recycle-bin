@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Empty Recycle Bin</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>Empty Recycle Bin</h1>
+    <a id="options" href="#" title="Options">Options</a>
+  </header>
+
+  <section id="view" hidden>
+    <div class="label">Current view</div>
+    <div id="view-name" class="view-name"></div>
+    <div id="view-module" class="muted"></div>
+  </section>
+
+  <p id="hint" class="muted">Checking this tab…</p>
+
+  <button id="run" class="danger" disabled>Empty recycle bin</button>
+  <p id="note" class="muted" hidden>You'll see how many records will go and confirm in the page before anything is deleted.</p>
+  <button id="cancel" hidden>Stop</button>
+
+  <div id="progress" hidden>
+    <div class="bar"><div id="bar-fill"></div></div>
+    <div id="progress-text" class="muted"></div>
+  </div>
+
+  <p id="error" class="error" hidden></p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
