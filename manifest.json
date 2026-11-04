@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Empty Recycle Bin",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "version_name": "0.2.1 without API",
   "description": "Permanently delete (forget) every record in a Freshsales / Freshworks CRM recycle bin, after you confirm.",
   "icons": {
@@ -12,13 +12,15 @@
   },
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.freshsales.io/*",
     "https://*.myfreshworks.com/*",
     "https://*.freshworks.com/*"
   ],
+  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "src/background/service-worker.js"
   },
