@@ -49,15 +49,21 @@ async function init() {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabId = tab && tab.id;
-  const host = tab && tab.url ? new URL(tab.url).host : '';
-  if (!/\.(freshsales\.io|myfreshworks\.com|freshworks\.com)$/.test(host)) {
+  // Built-in Freshworks domains, or a custom domain such as crm.example.com/crm/sales/...
+  const access = await FSX.customDomains.tabAccess(tab);
+  if (access.kind === 'needs-permission') {
+    FSX.customDomains.offerEnable($('hint'), access.host);
+    return;
+  }
+  if (access.kind === 'unsupported') {
     $('hint').textContent = 'Open the recycle bin in Freshsales to empty it.';
     return;
   }
+  if (access.kind === 'custom') FSX.customDomains.addForgetLink(document.body, access.host);
 
   let detected;
   try {
-    detected = await withTimeout(chrome.tabs.sendMessage(tabId, { type: 'ERB_DETECT' }), DETECT_TIMEOUT_MS);
+    detected = await withTimeout(FSX.customDomains.sendToTab(tabId, { type: 'ERB_DETECT' }, access), DETECT_TIMEOUT_MS);
   } catch (e) {
     $('hint').textContent =
       e && e.timeout
