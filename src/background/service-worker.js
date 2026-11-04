@@ -1,6 +1,10 @@
 // Tracks progress per tab so the popup can be closed and reopened mid-run,
 // and mirrors progress on the toolbar badge.
 
+importScripts('../lib/custom-domains.js');
+// Keep the content script registered on custom domains the user has allowed.
+FSX.customDomains.installBackgroundHandlers();
+
 const states = new Map(); // tabId -> latest state from the content script
 
 function setBadge(tabId, state) {

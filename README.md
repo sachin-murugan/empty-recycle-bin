@@ -16,6 +16,20 @@ optional API key), and retries on 429/5xx with backoff. Instead of writing a CSV
 
 > **This can't be undone.** Forgotten records are gone for good, including from the recycle bin.
 
+
+## Custom domains
+
+Accounts on your own domain (for example `https://crm.example.com/crm/sales/contacts/view/123`)
+work too. They use the Freshworks CRM paths (`/crm/sales/api`, ...). Chrome doesn't let the
+extension run on an unknown domain until you allow it, so the first time:
+
+1. Open any Freshsales page on that domain (its address contains `/crm/sales`).
+2. Click the extension's toolbar icon, then **Enable on crm.example.com**, and allow it in Chrome's prompt.
+
+That grants access to that one domain only, and the extension attaches to its tabs from then on.
+To undo it, click **Stop using on crm.example.com** in the popup, or remove the site under
+the extension's *Site access* in `chrome://extensions`.
+
 ## Use it
 
 1. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and pick this folder.
