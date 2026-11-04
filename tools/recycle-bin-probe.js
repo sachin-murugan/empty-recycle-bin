@@ -8,7 +8,7 @@
 // view's name and id), whether the page has a CSRF token for writes, and the
 // status and response keys of the first page of the open view. No record data.
 (async () => {
-  const crm = location.host.endsWith(".myfreshworks.com");
+  const crm = /\.(my)?freshworks\.com$/.test(location.host);
   // Web app routes only (this branch avoids the public /api prefix).
   const api = crm ? ["/crm/sales"] : [""];
   const route = location.hash.startsWith("#/") ? location.hash.slice(1) : location.pathname;

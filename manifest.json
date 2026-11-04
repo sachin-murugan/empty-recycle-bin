@@ -16,7 +16,8 @@
   ],
   "host_permissions": [
     "https://*.freshsales.io/*",
-    "https://*.myfreshworks.com/*"
+    "https://*.myfreshworks.com/*",
+    "https://*.freshworks.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js"
@@ -25,7 +26,8 @@
     {
       "matches": [
         "https://*.freshsales.io/*",
-        "https://*.myfreshworks.com/*"
+        "https://*.myfreshworks.com/*",
+        "https://*.freshworks.com/*"
       ],
       "js": [
         "src/lib/platform.js",

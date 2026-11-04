@@ -5,6 +5,7 @@ const { platform } = require('./load');
 test('detects platform from host', () => {
   assert.equal(platform.detectPlatform('acme.freshsales.io'), 'classic');
   assert.equal(platform.detectPlatform('acme.myfreshworks.com'), 'crm');
+  assert.equal(platform.detectPlatform('acme.freshworks.com'), 'crm');
   assert.equal(platform.detectPlatform('unknown.example.com'), 'crm');
 });
 

@@ -50,7 +50,7 @@ async function init() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabId = tab && tab.id;
   const host = tab && tab.url ? new URL(tab.url).host : '';
-  if (!/\.(freshsales\.io|myfreshworks\.com)$/.test(host)) {
+  if (!/\.(freshsales\.io|myfreshworks\.com|freshworks\.com)$/.test(host)) {
     $('hint').textContent = 'Open the recycle bin in Freshsales to empty it.';
     return;
   }
