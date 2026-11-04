@@ -7,6 +7,7 @@ Freshsales recycle bin. It works on both platforms:
 |--------|----------|----------|
 | `*.freshsales.io` | Classic Freshsales | `/api` |
 | `*.myfreshworks.com` | Freshworks CRM | `/crm/sales/api` |
+| `*.freshworks.com` | Freshworks CRM | `/crm/sales/api` |
 
 > **Branch `without-api`:** this variant never calls the public Freshsales API (`/api`,
 > `/crm/sales/api`). It reads the recycle bin through the web app's own routes and deletes by

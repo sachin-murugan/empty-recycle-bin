@@ -53,8 +53,8 @@ $('save').addEventListener('click', async () => {
     return;
   }
   const url = new URL(captured.url);
-  if (!/\.(freshsales\.io|myfreshworks\.com)$/.test(url.host)) {
-    setStatus('That request is not to a *.freshsales.io or *.myfreshworks.com address.', false);
+  if (!/\.(freshsales\.io|myfreshworks\.com|freshworks\.com)$/.test(url.host)) {
+    setStatus('That request is not to a *.freshsales.io, *.myfreshworks.com or *.freshworks.com address.', false);
     return;
   }
   const template = buildTemplate(captured);
