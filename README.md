@@ -7,6 +7,7 @@ Freshsales recycle bin. It works on both platforms:
 |--------|----------|----------|
 | `*.freshsales.io` | Classic Freshsales | `/api` |
 | `*.myfreshworks.com` | Freshworks CRM | `/crm/sales/api` |
+| `*.freshworks.com` | Freshworks CRM | `/crm/sales/api` |
 
 It is built the same way as [fs-list-view-exporter](https://github.com/sachin-murugan/fs-list-view-exporter):
 it reads the open view from the URL, pages through it with your logged-in session (or an
