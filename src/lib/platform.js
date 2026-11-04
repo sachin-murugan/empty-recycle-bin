@@ -1,5 +1,5 @@
 // Platform detection and API path styles for Classic Freshsales (*.freshsales.io)
-// and Freshworks CRM (*.myfreshworks.com). Same as fs-list-view-exporter's platform.js,
+// and Freshworks CRM (*.myfreshworks.com / *.freshworks.com). Same as fs-list-view-exporter's platform.js,
 // plus recognising the recycle bin view.
 (function (root) {
   const FSX = (root.FSX = root.FSX || {});
@@ -12,7 +12,7 @@
 
   const CRM = {
     platform: 'crm',
-    label: 'Freshworks CRM (.myfreshworks.com)',
+    label: 'Freshworks CRM (.myfreshworks.com / .freshworks.com)',
     apiFallbacks: ['/crm/sales/api', '/crm/sales'],
   };
 
