@@ -36,8 +36,8 @@ async function load() {
 $('save').addEventListener('click', async () => {
   const host = normalizeHost($('host').value);
   const key = $('key').value.trim();
-  if (!/\.(freshsales\.io|myfreshworks\.com|freshworks\.com)$/.test(host) || !key) {
-    $('status').textContent = 'Enter a *.freshsales.io, *.myfreshworks.com or *.freshworks.com domain and a key.';
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(host) || !key) {
+    $('status').textContent = 'Enter your Freshsales domain (for example acme.myfreshworks.com or a custom domain such as crm.example.com) and a key.';
     return;
   }
   const { apiKeys = {} } = await chrome.storage.local.get('apiKeys');
